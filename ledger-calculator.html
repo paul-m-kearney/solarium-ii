@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Solarium II Ledger Calculator</title>
+<style>
+  :root { --navy:#012169; --ink:#1c2430; --dim:#5b6675; --line:#d5dbe3; --bg:#f6f7f9; --card:#ffffff;
+          --pos:#1d7a3e; --neg:#b3261e; --warn:#8a5a00; --accent:#c84e00; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.45 -apple-system, "Segoe UI", Calibri, Arial, sans-serif; }
+  header { background:var(--navy); color:#fff; padding:18px 24px 14px; border-bottom:4px solid var(--accent); }
+  header h1 { margin:0; font-size:22px; }
+  header p { margin:4px 0 0; color:#c9d6e8; font-size:13px; }
+  main { max-width:1100px; margin:0 auto; padding:18px 16px 40px; }
+  .bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+  .seg button, .bar > button { border:1px solid var(--line); background:#fff; padding:7px 12px; border-radius:6px; cursor:pointer; font:inherit; }
+  .seg button[aria-pressed="true"] { background:var(--navy); color:#fff; border-color:var(--navy); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:860px) { .grid { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .card h2 { margin:0 0 2px; font-size:17px; display:flex; justify-content:space-between; align-items:baseline; }
+  .card .hint { margin:0 0 10px; color:var(--dim); font-size:13px; }
+  .total { font-size:15px; padding:2px 10px; border-radius:20px; }
+  .total.ok { background:#e3f3e8; color:var(--pos); } .total.off { background:#fbe7e5; color:var(--neg); }
+  .row { display:grid; grid-template-columns:150px 1fr 34px; gap:8px; align-items:center; padding:6px 0 2px; }
+  .row label { font-weight:600; font-size:14px; }
+  .row .val { text-align:right; font-weight:700; font-variant-numeric:tabular-nums; }
+  .eff { grid-column:1 / -1; font-size:13px; color:var(--dim); margin:-2px 0 4px; }
+  input[type=range] { width:100%; accent-color:var(--navy); }
+  .pos { color:var(--pos); font-weight:700; } .neg { color:var(--neg); font-weight:700; } .warn { color:var(--warn); font-weight:700; }
+  .row label.handoff { font-weight:400; } .handoff { font-size:13px; margin-left:6px; white-space:nowrap; }
+  .summary { margin-top:16px; }
+  .summary ul { margin:6px 0 0; padding-left:20px; }
+  .summary li { margin:3px 0; }
+  .note { color:var(--dim); font-size:13px; margin-top:14px; }
+  textarea { position:absolute; left:-9999px; }
+  @media print { header { background:none; color:#000; border:0; } header p { color:#333; } .bar button, .handoff input { display:none; }
+                 body { background:#fff; } .card { break-inside:avoid; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Project Solarium II · Ledger Calculator</h1>
+  <p>A practice tool for your Task Force's ledger. Nothing here is sent anywhere; your numbers stay in this browser. The memorandum, not this page, is what counts.</p>
+</header>
+<main>
+  <div class="bar">
+    <span class="seg" id="round">
+      <button type="button" data-r="1" aria-pressed="true">Round 1 · Dec 2026 to Nov 2030</button>
+      <button type="button" data-r="2" aria-pressed="false">Round 2 · Dec 2030 to Nov 2034</button>
+    </span>
+    <button type="button" id="copy">Copy ledger as text</button>
+    <button type="button" id="reset">Reset to 15s and 20s</button>
+    <button type="button" onclick="window.print()">Print</button>
+  </div>
+
+  <div class="grid">
+    <section class="card">
+      <h2>Vectors of power <span class="total" id="tot-v"></span></h2>
+      <p class="hint">Each 0 to 35, in steps of 5; the six must total exactly 100. Fifteen holds an indicator steady.</p>
+      <div id="vectors"></div>
+    </section>
+    <section class="card">
+      <h2>Theaters <span class="total" id="tot-t"></span></h2>
+      <p class="hint">Each 0 to 50, in steps of 5; the five must total exactly 100. <span id="mildip"></span></p>
+      <div id="theaters"></div>
+    </section>
+  </div>
+
+  <section class="card summary">
+    <h2>Check before you submit</h2>
+    <ul id="checks"></ul>
+  </section>
+
+  <p class="note">The rules, from the Player Handbook (section 5): each vector moves its indicator by 0.8 × (points − 15) over the round, so every
+    balanced ledger nets +8. Three-quarters of an Industry gain lands within the round; the rest arrives in the two years after. A theater under
+    10 points heats up (+2 tension) unless an adopted Signature Initiative in that theater hands it to named allies. A theater with 30 or more
+    points calms down (−2 tension) only if Military and Diplomacy together have at least 30. The President may blend the three ledgers, which
+    pulls every number toward the middle. The world's response, not this formula, decides how strong America ends up.</p>
+  <textarea id="clip" aria-hidden="true"></textarea>
+</main>
+<script>
+(function () {
+  "use strict";
+  var VEC = [["DIP", "Diplomacy & Alliances", "Alliance Cohesion"], ["MIL", "Military & Sea Power", "Military Strength"],
+             ["ECON", "Commerce & Finance", "Economic Strength"], ["IND", "Industry & Technology", "Industrial Base"],
+             ["INFO", "Information & Culture", "Global Influence"], ["HOME", "Home Front", "Home-Front Unity"]];
+  var THR = [["INDOPAC", "Indo-Pacific"], ["EUROPE", "Europe"], ["MIDEAST", "Middle East"],
+             ["WESTHEM", "Western Hemisphere"], ["GLOBAL", "Africa & Global South"]];
+  var START = { vectors: { DIP: 15, MIL: 20, ECON: 15, IND: 20, INFO: 15, HOME: 15 },
+                theaters: { INDOPAC: 20, EUROPE: 20, MIDEAST: 20, WESTHEM: 20, GLOBAL: 20 }, handoff: {} };
+  var round = 1, led = fresh();
+
+  function fresh() { return JSON.parse(JSON.stringify(START)); }
+  function load(r) { try { var v = JSON.parse(localStorage.getItem("solarium-ledger-r" + r)); if (v && v.vectors && v.theaters) { v.handoff = v.handoff || {}; return v; } } catch (e) {} return fresh(); }
+  function save() { try { localStorage.setItem("solarium-ledger-r" + round, JSON.stringify(led)); localStorage.setItem("solarium-ledger-round", String(round)); } catch (e) {} }
+  function years() { var y = 2026 + 4 * (round - 1); return { end: y + 4, pipe: (y + 5) + " to " + (y + 6) }; }
+  function sgn(n) { return n > 0 ? "+" + n : n < 0 ? "−" + Math.abs(n) : "0"; }
+  function base(p) { return Math.floor(4 * (p - 15) / 5); }            // 0.8 x (points - 15), exact in steps of 5
+  function sum(o) { var s = 0; for (var k in o) s += o[k]; return s; }
+  function milDip() { return led.vectors.MIL + led.vectors.DIP; }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+  function vecText(k, ind, p) {
+    var b = base(p), cls = b > 0 ? "pos" : b < 0 ? "neg" : "", y = years();
+    if (k === "IND" && b > 0) {
+      var now = Math.floor(b * 3 / 4);
+      return "<span class='" + cls + "'>" + sgn(now) + "</span> " + ind + " by Nov " + y.end + ", " + sgn(b - now) + " more in " + y.pipe;
+    }
+    return "<span class='" + cls + "'>" + sgn(b) + "</span> " + ind + " over the round" + (b < 0 ? " (what you do not fund decays)" : "");
+  }
+  function thrState(k) {
+    var p = led.theaters[k], md = milDip();
+    if (p < 10) return led.handoff[k] ? { t: "handed to named allies: no formula change, if the President adopts that initiative", c: "" }
+                                      : { t: "+2 tension: a vacuum invites trouble", c: "neg" };
+    if (p >= 30) return md >= 30 ? { t: "−2 tension: presence deters", c: "pos" }
+                                 : { t: "no credit: Military + Diplomacy is " + md + ", needs 30", c: "warn" };
+    return { t: "no formula change", c: "" };
+  }
+
+  function render() {
+    document.getElementById("vectors").innerHTML = VEC.map(function (v) {
+      return "<div class='row'><label for='v-" + v[0] + "'>" + esc(v[1]) + "</label><input type='range' id='v-" + v[0] + "' data-kind='vectors' data-k='" + v[0] +
+             "' min='0' max='35' step='5' value='" + led.vectors[v[0]] + "'><span class='val' id='n-" + v[0] + "'></span><div class='eff' id='e-" + v[0] + "'></div></div>";
+    }).join("");
+    document.getElementById("theaters").innerHTML = THR.map(function (t) {
+      return "<div class='row'><label for='t-" + t[0] + "'>" + esc(t[1]) + "</label><input type='range' id='t-" + t[0] + "' data-kind='theaters' data-k='" + t[0] +
+             "' min='0' max='50' step='5' value='" + led.theaters[t[0]] + "'><span class='val' id='n-" + t[0] + "'></span><div class='eff' id='e-" + t[0] + "'></div></div>";
+    }).join("");
+    Array.prototype.forEach.call(document.querySelectorAll("input[type=range]"), function (inp) {
+      inp.addEventListener("input", function () { led[inp.dataset.kind][inp.dataset.k] = Number(inp.value); save(); update(); });
+    });
+    update();
+  }
+
+  function update() {
+    VEC.forEach(function (v) {
+      document.getElementById("n-" + v[0]).textContent = led.vectors[v[0]];
+      document.getElementById("e-" + v[0]).innerHTML = vecText(v[0], v[2], led.vectors[v[0]]);
+    });
+    THR.forEach(function (t) {
+      var k = t[0], s = thrState(k), p = led.theaters[k];
+      document.getElementById("n-" + k).textContent = p;
+      document.getElementById("e-" + k).innerHTML = "<span class='" + s.c + "'>" + s.t + "</span>" + (p < 10 ?
+        "<label class='handoff'><input type='checkbox' data-h='" + k + "'" + (led.handoff[k] ? " checked" : "") + "> an initiative in this theater hands it to named allies</label>" : "");
+    });
+    Array.prototype.forEach.call(document.querySelectorAll("input[data-h]"), function (cb) {
+      cb.addEventListener("change", function () { led.handoff[cb.dataset.h] = cb.checked; save(); update(); });
+    });
+    var tv = sum(led.vectors), tt = sum(led.theaters);
+    setTotal("tot-v", tv); setTotal("tot-t", tt);
+    var md = milDip();
+    document.getElementById("mildip").innerHTML = "Military + Diplomacy: <b>" + md + "</b>" + (md >= 30 ? " (enough to back a presence)" : " (below 30: no theater gets presence credit)");
+    var net = VEC.reduce(function (s, v) { return s + base(led.vectors[v[0]]); }, 0);
+    var checks = [];
+    checks.push(tv === 100 ? "<span class='pos'>Vectors total 100.</span>" : "<span class='neg'>Vectors total " + tv + "; they must total exactly 100 (" + gap(tv) + ").</span>");
+    checks.push(tt === 100 ? "<span class='pos'>Theaters total 100.</span>" : "<span class='neg'>Theaters total " + tt + "; they must total exactly 100 (" + gap(tt) + ").</span>");
+    if (tv === 100) checks.push("Vector effects net " + sgn(net) + " over the round, as every balanced ledger does.");
+    var hot = THR.filter(function (t) { return led.theaters[t[0]] < 10 && !led.handoff[t[0]]; }).map(function (t) { return t[1]; });
+    if (hot.length) checks.push("<span class='warn'>Heats up:</span> " + hot.join(", ") + ". Hand each to named allies in a Signature Initiative for that theater, or accept the risk on purpose.");
+    var handed = THR.filter(function (t) { return led.theaters[t[0]] < 10 && led.handoff[t[0]]; }).map(function (t) { return t[1]; });
+    if (handed.length) checks.push("Handed off: " + handed.join(", ") + ". This counts only if the President adopts that initiative.");
+    var hollow = THR.filter(function (t) { return led.theaters[t[0]] >= 30 && md < 30; }).map(function (t) { return t[1]; });
+    if (hollow.length) checks.push("<span class='warn'>No presence credit:</span> " + hollow.join(", ") + (hollow.length > 1 ? " have" : " has") + " 30 or more points, but Military + Diplomacy is only " + md + ".");
+    var zero = VEC.filter(function (v) { return led.vectors[v[0]] === 0; }).map(function (v) { return v[1]; });
+    if (zero.length) checks.push("Zero points in " + zero.join(", ") + ": allowed, if it is a choice and not an accident.");
+    checks.push("If the President blends the three ledgers, every number moves toward the middle, and a handoff counts only if its initiative is adopted.");
+    document.getElementById("checks").innerHTML = checks.map(function (c) { return "<li>" + c + "</li>"; }).join("");
+  }
+  function gap(n) { return n > 100 ? "remove " + (n - 100) : "add " + (100 - n); }
+  function setTotal(id, n) { var el = document.getElementById(id); el.className = "total " + (n === 100 ? "ok" : "off"); el.textContent = n + " / 100"; }
+
+  function asText() {
+    var y = years(), lines = ["Solarium II ledger, Round " + round + " (to Nov " + y.end + ")", "", "Vectors of power (total " + sum(led.vectors) + "):"];
+    VEC.forEach(function (v) { lines.push("  " + v[0] + "  " + v[1] + ": " + led.vectors[v[0]]); });
+    lines.push("", "Theaters (total " + sum(led.theaters) + "):");
+    THR.forEach(function (t) { lines.push("  " + t[0] + "  " + t[1] + ": " + led.theaters[t[0]] + (led.theaters[t[0]] < 10 && led.handoff[t[0]] ? " (handed to named allies)" : "")); });
+    return lines.join("\n");
+  }
+  document.getElementById("copy").addEventListener("click", function () {
+    var b = this, text = asText(), done = function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy ledger as text"; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
+    function fallback() { var ta = document.getElementById("clip"); ta.value = text; ta.select(); try { document.execCommand("copy"); done(); } catch (e) { window.prompt("Copy your ledger:", text); } }
+  });
+  document.getElementById("reset").addEventListener("click", function () { led = fresh(); save(); render(); });
+  Array.prototype.forEach.call(document.querySelectorAll("#round button"), function (b) {
+    b.addEventListener("click", function () {
+      round = Number(b.dataset.r); led = load(round); save();
+      Array.prototype.forEach.call(document.querySelectorAll("#round button"), function (x) { x.setAttribute("aria-pressed", String(x === b)); });
+      render();
+    });
+  });
+  try { var r = Number(localStorage.getItem("solarium-ledger-round")); if (r === 2) round = 2; } catch (e) {}
+  Array.prototype.forEach.call(document.querySelectorAll("#round button"), function (x) { x.setAttribute("aria-pressed", String(Number(x.dataset.r) === round)); });
+  led = load(round);
+  render();
+})();
+</script>
+</body>
+</html>
